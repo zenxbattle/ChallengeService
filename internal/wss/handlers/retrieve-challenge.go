@@ -69,6 +69,17 @@ func RetreiveChallenge(ctx *wsstypes.WsContext) error {
 
 	log.Printf("[%s] [RetreiveChallenge] Sending latest challenge state to user %s", requestID, payload.UserId)
 
+	if err := ctx.State.LeaderboardManager.InitializeLeaderboard(payload.ChallengeId); err != nil {
+		log.Printf("[%s] [RetreiveChallenge] Failed to initialize leaderboard: %v", requestID, err)
+	} else {
+		leaderboard, err := ctx.State.LeaderboardManager.GetLeaderboard(payload.ChallengeId, 50, &challengeDoc)
+		if err != nil {
+			log.Printf("[%s] [RetreiveChallenge] Failed to fetch leaderboard snapshot: %v", requestID, err)
+		} else {
+			challengeDoc.Leaderboard = leaderboard
+		}
+	}
+
 	return broadcasts.SendJSON(ctx.Conn, map[string]interface{}{
 		"type":    wsstypes.RETRIEVE_CHALLENGE,
 		"status":  "ok",

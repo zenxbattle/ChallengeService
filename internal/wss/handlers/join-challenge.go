@@ -92,7 +92,6 @@ func JoinChallengeHandler(ctx *wsstypes.WsContext) error {
 	// Check access (simplified - checking password if private)
 	if challengeDoc.IsPrivate && challengeDoc.Password != payload.Password {
 		log.Printf("[%s] [JoinChallenge] Access denied to challenge %s", requestID, payload.ChallengeId)
-		ctx.Conn.Close()
 		return broadcasts.SendErrorWithType(ctx.Conn, wsstypes.JOIN_CHALLENGE, "Invalid challenge ID or password", nil)
 	}
 
@@ -115,11 +114,30 @@ func JoinChallengeHandler(ctx *wsstypes.WsContext) error {
 		log.Printf("[%s] [JoinChallenge] Participant %s rejoined", requestID, userData.UserID)
 	}
 	participant.LastConnected = time.Now().Unix()
+	challengeDoc.Participants[userData.UserID] = participant
 
 	// Update participant in Redis
 	err = ctx.State.Redis.UpdateParticipant(context.Background(), payload.ChallengeId, userData.UserID, participant)
 	if err != nil {
 		log.Printf("[%s] [JoinChallenge] Failed to update participant: %v", requestID, err)
+	}
+
+	if err := ctx.State.LeaderboardManager.InitializeLeaderboard(payload.ChallengeId); err != nil {
+		log.Printf("[%s] [JoinChallenge] Failed to initialize leaderboard: %v", requestID, err)
+	}
+
+	if err := ctx.State.LeaderboardManager.UpdateParticipantScore(payload.ChallengeId, userData.UserID, participant.TotalScore); err != nil {
+		log.Printf("[%s] [JoinChallenge] Failed to add participant to leaderboard: %v", requestID, err)
+	}
+
+	leaderboard, err := ctx.State.LeaderboardManager.GetLeaderboard(payload.ChallengeId, 50, &challengeDoc)
+	if err != nil {
+		log.Printf("[%s] [JoinChallenge] Failed to fetch leaderboard snapshot: %v", requestID, err)
+	} else {
+		challengeDoc.Leaderboard = leaderboard
+		if err := ctx.State.Redis.UpdateChallenge(context.Background(), &challengeDoc); err != nil {
+			log.Printf("[%s] [JoinChallenge] Failed to persist challenge snapshot: %v", requestID, err)
+		}
 	}
 
 	// Add WebSocket connection to local state
@@ -129,7 +147,11 @@ func JoinChallengeHandler(ctx *wsstypes.WsContext) error {
 	wsClients := ctx.State.LocalState.GetAllWSClients(payload.ChallengeId)
 	broadcasts.BroadcastEntityJoinedWithClients(wsClients, userData.UserID, payload.ChallengeId, userData.UserID == challengeDoc.CreatorID)
 
-	challengeToken, _ := ctx.State.JwtManager.GenerateToken(payload.UserId, payload.ChallengeId, time.Duration(challengeDoc.TimeLimit)+constants.BufferTime)
+	challengeToken, _ := ctx.State.JwtManager.GenerateToken(
+		userData.UserID,
+		payload.ChallengeId,
+		time.Duration(challengeDoc.TimeLimit)*time.Millisecond+constants.BufferTime,
+	)
 
 	return broadcasts.SendJSON(ctx.Conn, map[string]interface{}{
 		"type":    wsstypes.JOIN_CHALLENGE,

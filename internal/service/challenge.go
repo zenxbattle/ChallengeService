@@ -38,7 +38,7 @@ func (s *ChallengeService) fetchChallengesConcurrently(ctx context.Context, chal
 			challenge, err := s.GlobalState.Redis.GetChallengeByID(ctx, challengeID)
 			if err == nil {
 				mu.Lock()
-				if challenge.IsPrivate == isPrivate { 
+				if challenge.IsPrivate == isPrivate {
 					challenges = append(challenges, challenge)
 				}
 				mu.Unlock()
@@ -107,7 +107,7 @@ func (s *ChallengeService) CreateChallenge(ctx context.Context, req *challengePb
 		}
 	}
 
-	return req, nil
+	return ChallengesToProto([]*model.ChallengeDocument{modelChallengeDoc}, false)[0], nil
 }
 
 func (s *ChallengeService) LeaveChallenge(ctx context.Context, challengeId, userId string) bool {
@@ -187,10 +187,12 @@ func (s *ChallengeService) AbandonChallenge(ctx context.Context, req *challengeP
 	return &challengePb.AbandonChallengeResponse{Success: true}, nil
 }
 func (s *ChallengeService) GetFullChallengeData(ctx context.Context, req *challengePb.GetFullChallengeDataRequest) (*challengePb.GetFullChallengeDataResponse, error) {
-	// Read from Redis repository only - no MongoDB fallback for active challenge data
 	challenge, err := s.GlobalState.Redis.GetChallengeByID(ctx, req.ChallengeId)
 	if err != nil {
-		return nil, err
+		challenge, err = s.GlobalState.Mongo.GetChallengeByID(ctx, req.ChallengeId)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &challengePb.GetFullChallengeDataResponse{
@@ -362,6 +364,11 @@ func (s *ChallengeService) PushSubmissionStatus(ctx context.Context, req *challe
 	leaderboard, err = s.GlobalState.LeaderboardManager.GetLeaderboard(challengeID, 50, &challenge) // Get top 50
 	if err != nil {
 		log.Printf("[PushSubmissionStatus] Failed to get leaderboard: %v", err)
+	} else {
+		challenge.Leaderboard = leaderboard
+		if err := s.GlobalState.Redis.UpdateChallenge(ctx, &challenge); err != nil {
+			log.Printf("[PushSubmissionStatus] Failed to persist leaderboard snapshot: %v", err)
+		}
 	}
 
 	// Get user's new rank
