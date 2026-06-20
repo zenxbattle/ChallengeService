@@ -1,0 +1,53 @@
+7337
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: challenge-manager
+  namespace: xcode
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: challenge-manager
+  template:
+    metadata:
+      labels:
+        app: challenge-manager
+    spec:
+      containers:
+      - name: challenge-manager
+        image: lijuthomas/challenge-manager:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 7777
+          name: ws
+        - containerPort: 50057
+          name: grpc
+        envFrom:
+        - configMapRef:
+            name: xcode-config
+        - secretRef:
+            name: xcode-secrets
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: challenge-manager
+  namespace: xcode
+spec:
+  selector:
+    app: challenge-manager
+  ports:
+  - name: ws
+    port: 7777
+    targetPort: 7777
+  - name: grpc
+    port: 50057
+    targetPort: 50057
