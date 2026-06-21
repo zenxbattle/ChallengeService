@@ -1,42 +1,70 @@
-# ChallengeWssManagerService
+# ZenXBattle Challenge Service
 
-A Go-based service for managing LeetCode-like tournament rooms with real-time updates via WebSockets.
+Real-time coding battle orchestrator. Manages challenge lifecycle (create, join, submit, judge), WebSocket connections for live updates, and leaderboard synchronization.
 
-## ⚙️ Setup
+## Architecture
 
-1. **Ensure Go 1.21+ is installed**
-2. **Clone the repository**  
-   `git clone https://github.com/lijuuu/ChallengeWssManagerService && cd ChallengeWssManagerService`
-3. **Install dependencies**  
-   `go mod tidy`
-4. **Run the server**  
-   `go run cmd/server/main.go`
+```
+Browser ↔ WebSocket (wss) ← ChallengeService (:50052)
+           gRPC calls → CodeExecutionEngine (code judge)
+           gRPC calls → RedisBoard (leaderboard)
+           PostgreSQL (challenge state)
+```
 
-## 🛠 Endpoints
+## Tech Stack
 
-- `POST /challenges`: Create a new challenge  
-- `GET /challenges`: List open challenges  
-- `GET /challenges/{challenge_id}`: Get challenge details  
-- `GET /ws/{challenge_id}`: WebSocket endpoint for real-time updates
+- **Go** + gRPC
+- **WebSockets** (gorilla/websocket) for real-time battle state
+- **PostgreSQL** for challenge persistence  
+- **Redis** for leaderboard
+- **ants** goroutine pool for concurrent match handling
+- **JWT** for player auth within challenges
 
-## 🔌 WebSocket Messages
+## Challenge Lifecycle
 
-- `join_challenge`: Join a challenge  
-- `start_challenge`: Start a challenge (creator only)  
-- `end_challenge`: End a challenge (creator only)  
-- `delete_challenge`: Delete a challenge (creator only)  
-- `submit_problem`: Submit a problem solution  
-- `forfeit`: Forfeit the challenge  
-- `ping`: Keep the session alive
+```
+Create → Wait → Start → Battle → Judge → Complete
+   │        │       │       │       │        │
+   │   players     │    code     │    result    │
+   │    join       │   submit    │    update     │
+   │               │             │    leaderboard│
+```
 
-## ⚙️ Configuration
+## gRPC Endpoints
 
-- **Server Port**: `:8080`  
-- **Max Concurrent Matches**: `100`  
-- **Session Timeout**: `30 minutes`  
-- **WebSocket Read Timeout**: `60 seconds`  
-- **Empty Challenge Timeout**: `10 minutes`
+| Method | Description |
+|--------|-------------|
+| `CreateChallenge` | Create new battle room |
+| `JoinChallenge` | Player joins a room |
+| `SubmitCode` | Player submits code for judging |
+| `GetChallengeState` | Current state of a challenge |
+| `ListActiveChallenges` | All active battles |
+| `GetResults` | Final results of a completed challenge |
 
----
+## Quick Start
 
-🧪 Built for fast-paced, competitive environments where real-time code battles matter.
+```bash
+export DB_HOST=localhost DB_PORT=5432 DB_USER=zenx DB_PASS=zenx123
+export CODE_ENGINE_ADDR=localhost:50054
+export REDIS_ADDR=localhost:6379
+
+go run cmd/main.go
+# → gRPC + WebSocket on :50052
+```
+
+## Docker
+
+```bash
+docker build -t zenxbattle-challenge .
+docker run -p 50052:50052 zenxbattle-challenge
+```
+
+## Related Services
+
+- [CodeExecutionEngine](https://github.com/zenxbattle/CodeExecutionEngine) — sandboxed code judge
+- [RedisBoard](https://github.com/zenxbattle/RedisBoard) — leaderboard engine
+- [Frontend](https://github.com/zenxbattle/Frontend) — battle UI
+- [ApiGateway](https://github.com/zenxbattle/ApiGateway) — REST proxy
+- [CommonProto](https://github.com/zenxbattle/CommonProto) — protobuf definitions
+
+See [lifecycle.md](./lifecycle.md) for detailed challenge state machine documentation.
